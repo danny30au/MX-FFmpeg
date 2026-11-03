@@ -23,7 +23,7 @@ jobs:
         uses: nttld/setup-ndk@v1
         id: setup-ndk
         with:
-          ndk-version: r27c
+          ndk-version: r30
       - name: build arm64 codec
         run: ./build.sh --arm64
         shell: bash
