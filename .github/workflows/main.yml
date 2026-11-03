@@ -29,8 +29,8 @@ jobs:
         shell: bash
         env:
           LDFLAGS: "-Wl,--emit-relocs -Wl,--gc-sections -Wl,-Bsymbolic -Wl,--undefined-version"
-          CFLAGS: "-O3 -flto=thin -march=armv9-a+crypto+dotprod+i8mm+sve2 -mcpu=cortex-x4 -fomit-frame-pointer -fno-signed-zeros -fno-trapping-math -funroll-loops"
-          CXXFLAGS: "-O3 -flto=thin -march=armv9-a+crypto+dotprod+i8mm+sve2 -mcpu=cortex-x4 -fomit-frame-pointer -fno-signed-zeros -fno-trapping-math -funroll-loops"
+          CFLAGS: "-O3 -flto=full -march=armv9-a+crypto+dotprod+i8mm+sve2 -mcpu=cortex-x4 -mllvm -align-loops=32 -falign-functions=64 -fomit-frame-pointer -fno-signed-zeros -fno-trapping-math -funroll-loops"
+          CXXFLAGS: "-O3 -flto=full -march=armv9-a+crypto+dotprod+i8mm+sve2 -mcpu=cortex-x4 -mllvm -align-loops=32 -falign-functions=64 -fomit-frame-pointer -fno-signed-zeros -fno-trapping-math -funroll-loops"
       - name: save artifacts
         uses: actions/upload-artifact@v4
         if: success()
@@ -57,8 +57,8 @@ jobs:
         shell: bash
         env:
           LDFLAGS: "-Wl,--emit-relocs -Wl,--gc-sections -Wl,-Bsymbolic -Wl,--undefined-version"
-          CFLAGS: "-O3 -flto=thin -march=armv9-a+crypto+dotprod+i8mm+sve2 -mcpu=cortex-x4 -fomit-frame-pointer -fno-signed-zeros -fno-trapping-math -funroll-loops"
-          CXXFLAGS: "-O3 -flto=thin -march=armv9-a+crypto+dotprod+i8mm+sve2 -mcpu=cortex-x4 -fomit-frame-pointer -fno-signed-zeros -fno-trapping-math -funroll-loops"
+          CFLAGS: "-O3 -flto=full -march=armv9-a+crypto+dotprod+i8mm+sve2 -mcpu=cortex-x4 -mllvm -align-loops=32 -falign-functions=64 -fomit-frame-pointer -fno-signed-zeros -fno-trapping-math -funroll-loops"
+          CXXFLAGS: "-O3 -flto=full -march=armv9-a+crypto+dotprod+i8mm+sve2 -mcpu=cortex-x4 -mllvm -align-loops=32 -falign-functions=64 -fomit-frame-pointer -fno-signed-zeros -fno-trapping-math -funroll-loops"
       - name: save artifacts
         uses: actions/upload-artifact@v4
         if: success()
@@ -85,8 +85,8 @@ jobs:
         shell: bash
         env:
           LDFLAGS: "-Wl,--emit-relocs -Wl,--gc-sections -Wl,-Bsymbolic -Wl,--undefined-version"
-          CFLAGS: "-O3 -flto=thin -fomit-frame-pointer -fno-signed-zeros -fno-trapping-math -funroll-loops"
-          CXXFLAGS: "-O3 -flto=thin -fomit-frame-pointer -fno-signed-zeros -fno-trapping-math -funroll-loops"
+          CFLAGS: "-O3 -flto=full -fomit-frame-pointer -fno-signed-zeros -fno-trapping-math -funroll-loops"
+          CXXFLAGS: "-O3 -flto=full -fomit-frame-pointer -fno-signed-zeros -fno-trapping-math -funroll-loops"
       - name: save artifacts
         uses: actions/upload-artifact@v4
         if: success()
@@ -113,8 +113,8 @@ jobs:
         shell: bash
         env:
           LDFLAGS: "-Wl,--emit-relocs -Wl,--gc-sections -Wl,-Bsymbolic -Wl,--undefined-version"
-          CFLAGS: "-O3 -flto=thin -fomit-frame-pointer -fno-signed-zeros -fno-trapping-math -funroll-loops"
-          CXXFLAGS: "-O3 -flto=thin -fomit-frame-pointer -fno-signed-zeros -fno-trapping-math -funroll-loops"
+          CFLAGS: "-O3 -flto=full -fomit-frame-pointer -fno-signed-zeros -fno-trapping-math -funroll-loops"
+          CXXFLAGS: "-O3 -flto=full -fomit-frame-pointer -fno-signed-zeros -fno-trapping-math -funroll-loops"
       - name: save artifacts
         uses: actions/upload-artifact@v4
         if: success()
