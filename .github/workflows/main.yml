@@ -28,7 +28,7 @@ jobs:
         run: ./build.sh --arm64
         shell: bash
         env:
-          LDFLAGS: "-Wl,--emit-relocs -Wl,--gc-sections -Wl,-Bsymbolic"
+          LDFLAGS: "-Wl,--emit-relocs -Wl,--gc-sections -Wl,-Bsymbolic -Wl,--undefined-version"
           CFLAGS: "-O3 -flto=thin -march=armv9-a+crypto+dotprod+i8mm+sve2 -mcpu=cortex-x4 -fomit-frame-pointer -fno-signed-zeros -fno-trapping-math -funroll-loops"
           CXXFLAGS: "-O3 -flto=thin -march=armv9-a+crypto+dotprod+i8mm+sve2 -mcpu=cortex-x4 -fomit-frame-pointer -fno-signed-zeros -fno-trapping-math -funroll-loops"
       - name: save artifacts
@@ -56,7 +56,7 @@ jobs:
         run: ./build.sh --neon
         shell: bash
         env:
-          LDFLAGS: "-Wl,--emit-relocs -Wl,--gc-sections -Wl,-Bsymbolic"
+          LDFLAGS: "-Wl,--emit-relocs -Wl,--gc-sections -Wl,-Bsymbolic -Wl,--undefined-version"
           CFLAGS: "-O3 -flto=thin -march=armv9-a+crypto+dotprod+i8mm+sve2 -mcpu=cortex-x4 -fomit-frame-pointer -fno-signed-zeros -fno-trapping-math -funroll-loops"
           CXXFLAGS: "-O3 -flto=thin -march=armv9-a+crypto+dotprod+i8mm+sve2 -mcpu=cortex-x4 -fomit-frame-pointer -fno-signed-zeros -fno-trapping-math -funroll-loops"
       - name: save artifacts
@@ -84,7 +84,7 @@ jobs:
         run: ./build.sh --x86_64
         shell: bash
         env:
-          LDFLAGS: "-Wl,--emit-relocs -Wl,--gc-sections -Wl,-Bsymbolic"
+          LDFLAGS: "-Wl,--emit-relocs -Wl,--gc-sections -Wl,-Bsymbolic -Wl,--undefined-version"
           CFLAGS: "-O3 -flto=thin -fomit-frame-pointer -fno-signed-zeros -fno-trapping-math -funroll-loops"
           CXXFLAGS: "-O3 -flto=thin -fomit-frame-pointer -fno-signed-zeros -fno-trapping-math -funroll-loops"
       - name: save artifacts
@@ -112,7 +112,7 @@ jobs:
         run: ./build.sh --x86
         shell: bash
         env:
-          LDFLAGS: "-Wl,--emit-relocs -Wl,--gc-sections -Wl,-Bsymbolic"
+          LDFLAGS: "-Wl,--emit-relocs -Wl,--gc-sections -Wl,-Bsymbolic -Wl,--undefined-version"
           CFLAGS: "-O3 -flto=thin -fomit-frame-pointer -fno-signed-zeros -fno-trapping-math -funroll-loops"
           CXXFLAGS: "-O3 -flto=thin -fomit-frame-pointer -fno-signed-zeros -fno-trapping-math -funroll-loops"
       - name: save artifacts
