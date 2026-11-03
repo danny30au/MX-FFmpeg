@@ -27,6 +27,8 @@ jobs:
       - name: build arm64 codec
         run: ./build.sh --arm64
         shell: bash
+        env:
+          LDFLAGS: "-Wl,--emit-relocs"
       - name: save artifacts
         uses: actions/upload-artifact@v4
         if: success()
@@ -51,6 +53,8 @@ jobs:
       - name: build neon codec
         run: ./build.sh --neon
         shell: bash
+        env:
+          LDFLAGS: "-Wl,--emit-relocs"
       - name: save artifacts
         uses: actions/upload-artifact@v4
         if: success()
@@ -75,6 +79,8 @@ jobs:
       - name: build x86_64 codec
         run: ./build.sh --x86_64
         shell: bash
+        env:
+          LDFLAGS: "-Wl,--emit-relocs"
       - name: save artifacts
         uses: actions/upload-artifact@v4
         if: success()
@@ -99,6 +105,8 @@ jobs:
       - name: build x86 codec
         run: ./build.sh --x86
         shell: bash
+        env:
+          LDFLAGS: "-Wl,--emit-relocs"
       - name: save artifacts
         uses: actions/upload-artifact@v4
         if: success()
