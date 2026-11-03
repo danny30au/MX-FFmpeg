@@ -23,7 +23,7 @@ jobs:
         uses: nttld/setup-ndk@v1
         id: setup-ndk
         with:
-          ndk-version: r27c
+          ndk-version: r30
       - name: build arm64 codec
         run: ./build.sh --arm64
         shell: bash
@@ -47,7 +47,7 @@ jobs:
         uses: nttld/setup-ndk@v1
         id: setup-ndk
         with:
-          ndk-version: r27c
+          ndk-version: r30
       - name: build neon codec
         run: ./build.sh --neon
         shell: bash
@@ -71,7 +71,7 @@ jobs:
         uses: nttld/setup-ndk@v1
         id: setup-ndk
         with:
-          ndk-version: r27c
+          ndk-version: r30
       - name: build x86_64 codec
         run: ./build.sh --x86_64
         shell: bash
@@ -95,7 +95,7 @@ jobs:
         uses: nttld/setup-ndk@v1
         id: setup-ndk
         with:
-          ndk-version: r27c
+          ndk-version: r30
       - name: build x86 codec
         run: ./build.sh --x86
         shell: bash
