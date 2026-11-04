@@ -31,8 +31,8 @@ jobs:
           LDFLAGS: "-Wl,--emit-relocs -Wl,--gc-sections -Wl,-Bsymbolic -Wl,--undefined-version"
           CFLAGS: "-O3 -march=armv9-a+crypto+dotprod+i8mm+sve2 -mcpu=cortex-x4 -fomit-frame-pointer -fno-signed-zeros -fno-trapping-math -funroll-loops"
           CXXFLAGS: "-O3 -march=armv9-a+crypto+dotprod+i8mm+sve2 -mcpu=cortex-x4 -fomit-frame-pointer -fno-signed-zeros -fno-trapping-math -funroll-loops"
-          EXTRA_CFLAGS: "-flto=full -mllvm -align-loops=32 -falign-functions=64 -mllvm -unroll-threshold=400 -mllvm -loop-unroll-max-upper-bound=32"
-          EXTRA_CXXFLAGS: "-flto=full -mllvm -align-loops=32 -falign-functions=64 -mllvm -unroll-threshold=400 -mllvm -loop-unroll-max-upper-bound=32"
+          EXTRA_CFLAGS: "-flto=full -mllvm -align-loops=32 -falign-functions=64 -mllvm -unroll-threshold=400 -mllvm -loop-unroll-max-upper-bound=32 -fno-builtin-malloc -fno-builtin-calloc -fno-builtin-realloc -fno-builtin-free"
+          EXTRA_CXXFLAGS: "-flto=full -mllvm -align-loops=32 -falign-functions=64 -mllvm -unroll-threshold=400 -mllvm -loop-unroll-max-upper-bound=32 -fno-builtin-malloc -fno-builtin-calloc -fno-builtin-realloc -fno-builtin-free"
       - name: save artifacts
         uses: actions/upload-artifact@v4
         if: success()
@@ -61,8 +61,8 @@ jobs:
           LDFLAGS: "-Wl,--emit-relocs -Wl,--gc-sections -Wl,-Bsymbolic -Wl,--undefined-version"
           CFLAGS: "-O3 -march=armv9-a+crypto+dotprod+i8mm+sve2 -mcpu=cortex-x4 -fomit-frame-pointer -fno-signed-zeros -fno-trapping-math -funroll-loops"
           CXXFLAGS: "-O3 -march=armv9-a+crypto+dotprod+i8mm+sve2 -mcpu=cortex-x4 -fomit-frame-pointer -fno-signed-zeros -fno-trapping-math -funroll-loops"
-          EXTRA_CFLAGS: "-flto=full -mllvm -align-loops=32 -falign-functions=64 -mllvm -unroll-threshold=400 -mllvm -loop-unroll-max-upper-bound=32"
-          EXTRA_CXXFLAGS: "-flto=full -mllvm -align-loops=32 -falign-functions=64 -mllvm -unroll-threshold=400 -mllvm -loop-unroll-max-upper-bound=32"
+          EXTRA_CFLAGS: "-flto=full -mllvm -align-loops=32 -falign-functions=64 -mllvm -unroll-threshold=400 -mllvm -loop-unroll-max-upper-bound=32 -fno-builtin-malloc -fno-builtin-calloc -fno-builtin-realloc -fno-builtin-free"
+          EXTRA_CXXFLAGS: "-flto=full -mllvm -align-loops=32 -falign-functions=64 -mllvm -unroll-threshold=400 -mllvm -loop-unroll-max-upper-bound=32 -fno-builtin-malloc -fno-builtin-calloc -fno-builtin-realloc -fno-builtin-free"
       - name: save artifacts
         uses: actions/upload-artifact@v4
         if: success()
