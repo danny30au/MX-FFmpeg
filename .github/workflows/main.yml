@@ -24,6 +24,9 @@ jobs:
         id: setup-ndk
         with:
           ndk-version: r30
+      - name: patch hardcoded armv8-a override in build-ffmpeg.sh
+        run: |
+          sed -i 's/-march=armv8-a/-march=armv9-a+crypto+dotprod+i8mm+sve2 -mcpu=cortex-x4/g' src/jni/build-ffmpeg.sh
       - name: build arm64 codec
         run: ./build.sh --arm64
         shell: bash
@@ -31,8 +34,8 @@ jobs:
           LDFLAGS: "-Wl,--emit-relocs -Wl,--gc-sections -Wl,-Bsymbolic -Wl,--undefined-version"
           CFLAGS: "-O3 -march=armv9-a+crypto+dotprod+i8mm+sve2 -mcpu=cortex-x4 -fomit-frame-pointer -fno-signed-zeros -fno-trapping-math -funroll-loops"
           CXXFLAGS: "-O3 -march=armv9-a+crypto+dotprod+i8mm+sve2 -mcpu=cortex-x4 -fomit-frame-pointer -fno-signed-zeros -fno-trapping-math -funroll-loops"
-          EXTRA_CFLAGS: "-flto=full -mllvm -align-loops=32 -falign-functions=64 -mllvm -unroll-threshold=400"
-          EXTRA_CXXFLAGS: "-flto=full -mllvm -align-loops=32 -falign-functions=64 -mllvm -unroll-threshold=400"
+          EXTRA_CFLAGS: "-flto=full -falign-loops=32 -falign-functions=64 -mllvm -unroll-threshold=400"
+          EXTRA_CXXFLAGS: "-flto=full -falign-loops=32 -falign-functions=64 -mllvm -unroll-threshold=400"
       - name: dump ffmpeg config.log on failure
         if: failure()
         run: find . -name "config.log" -exec tail -n 50 {} +
@@ -65,8 +68,8 @@ jobs:
           LDFLAGS: "-Wl,--emit-relocs -Wl,--gc-sections -Wl,-Bsymbolic -Wl,--undefined-version"
           CFLAGS: "-O3 -fomit-frame-pointer -fno-signed-zeros -fno-trapping-math -funroll-loops"
           CXXFLAGS: "-O3 -fomit-frame-pointer -fno-signed-zeros -fno-trapping-math -funroll-loops"
-          EXTRA_CFLAGS: "-flto=full -mllvm -align-loops=32 -falign-functions=64 -mllvm -unroll-threshold=400"
-          EXTRA_CXXFLAGS: "-flto=full -mllvm -align-loops=32 -falign-functions=64 -mllvm -unroll-threshold=400"
+          EXTRA_CFLAGS: "-flto=full -falign-loops=32 -falign-functions=64 -mllvm -unroll-threshold=400"
+          EXTRA_CXXFLAGS: "-flto=full -falign-loops=32 -falign-functions=64 -mllvm -unroll-threshold=400"
       - name: dump ffmpeg config.log on failure
         if: failure()
         run: find . -name "config.log" -exec tail -n 50 {} +
