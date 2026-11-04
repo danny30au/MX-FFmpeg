@@ -24,9 +24,9 @@ jobs:
         id: setup-ndk
         with:
           ndk-version: r30
-      - name: patch hardcoded armv8-a override in build-ffmpeg.sh
+      - name: hook build.sh to upgrade armv8-a to armv9-a once unpacked
         run: |
-          sed -i 's/-march=armv8-a/-march=armv9-a+crypto+dotprod+i8mm+sve2 -mcpu=cortex-x4/g' src/jni/build-ffmpeg.sh
+          sed -i 's|build-ffmpeg.sh arm64|build-ffmpeg.sh arm64|; /build-ffmpeg.sh/i find . -name "build-ffmpeg.sh" -exec sed -i "s/-march=armv8-a/-march=armv9-a+crypto+dotprod+i8mm+sve2 -mcpu=cortex-x4/g" {} +' build.sh
       - name: build arm64 codec
         run: ./build.sh --arm64
         shell: bash
@@ -91,83 +91,4 @@ jobs:
       - name: install build tools
         run: sudo apt update && sudo apt install -y nasm meson ninja-build
       - name: setting up NDK
-        uses: nttld/setup-ndk@v1
-        id: setup-ndk
-        with:
-          ndk-version: r30
-      - name: build x86_64 codec
-        run: ./build.sh --x86_64
-        shell: bash
-        env:
-          LDFLAGS: "-Wl,--emit-relocs -Wl,--gc-sections -Wl,-Bsymbolic -Wl,--undefined-version"
-          CFLAGS: "-O3 -fomit-frame-pointer -fno-signed-zeros -fno-trapping-math -funroll-loops"
-          CXXFLAGS: "-O3 -fomit-frame-pointer -fno-signed-zeros -fno-trapping-math -funroll-loops"
-          EXTRA_CFLAGS: "-flto=full"
-          EXTRA_CXXFLAGS: "-flto=full"
-      - name: save artifacts
-        uses: actions/upload-artifact@v4
-        if: success()
-        with:
-          name: artifact-x86_64
-          path: |
-            output/*.zip
-            !output/aio*.zip
-          if-no-files-found: error
-
-  build-x86:
-    runs-on: ubuntu-latest
-    steps:
-      - name: checkout tools repo
-        uses: actions/checkout@v4
-      - name: install build tools
-        run: sudo apt update && sudo apt install -y nasm meson ninja-build
-      - name: setting up NDK
-        uses: nttld/setup-ndk@v1
-        id: setup-ndk
-        with:
-          ndk-version: r30
-      - name: build x86 codec
-        run: ./build.sh --x86
-        shell: bash
-        env:
-          LDFLAGS: "-Wl,--emit-relocs -Wl,--gc-sections -Wl,-Bsymbolic -Wl,--undefined-version"
-          CFLAGS: "-O3 -fomit-frame-pointer -fno-signed-zeros -fno-trapping-math -funroll-loops"
-          CXXFLAGS: "-O3 -fomit-frame-pointer -fno-signed-zeros -fno-trapping-math -funroll-loops"
-          EXTRA_CFLAGS: "-flto=full"
-          EXTRA_CXXFLAGS: "-flto=full"
-      - name: save artifacts
-        uses: actions/upload-artifact@v4
-        if: success()
-        with:
-          name: artifact-x86
-          path: |
-            output/*.zip
-            !output/aio*.zip
-          if-no-files-found: error
-
-  publishing:
-    runs-on: ubuntu-latest
-    needs: [build-arm64, build-neon, build-x86_64, build-x86]
-    steps:
-      - name: download artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-          pattern: artifact-*
-          merge-multiple: true
-      - name: list all artifacts
-        run: ls -R artifacts
-      - name: merge artifacts
-        if: success()
-        run: |
-          mkdir temp
-          unzip -q 'artifacts/*.zip' -d temp/
-          zip -j artifacts/aio-${{ github.ref_name }}.zip temp/*
-      - name: publish artifacts
-        uses: softprops/action-gh-release@v1
-        if: ${{ github.ref_type == 'tag' }}
-        with:
-          files: artifacts/*.zip
-          fail_on_unmatched_files: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        uses
