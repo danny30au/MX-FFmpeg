@@ -19,7 +19,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: install build tools
-        run: sudo apt update && sudo apt install -y nasm meson ninja-build zip unzip
+        run: sudo apt update && sudo apt install -y nasm meson ninja-build zip unzip binutils
 
       - name: setting up NDK
         uses: nttld/setup-ndk@v1
@@ -27,26 +27,55 @@ jobs:
         with:
           ndk-version: r30
 
-      - name: hook build.sh to upgrade armv8-a to armv9-a and preserve relocs for BOLT
+      - name: wrap NDK linker and strip to guarantee relocations for BOLT
+        shell: bash
         run: |
-          sed -i '/build-ffmpeg.sh/i find . -name "build-ffmpeg.sh" -exec sed -i "s/-march=armv8-a/-march=armv9-a+crypto+dotprod+i8mm+sve2 -mcpu=cortex-x4/g; s/--enable-stripping/--disable-stripping/g; s/\\$CROSS_PREFIX-strip/true/g; s/llvm-strip/true/g" {} +' build.sh
+          BOLT_BIN=$(find /opt/hostedtoolcache/ndk -name "llvm-bolt" | head -n 1)
+          TOOLCHAIN_BIN=$(dirname "$BOLT_BIN")
+          echo "Found NDK toolchain bin: $TOOLCHAIN_BIN"
+
+          # Back up real llvm-strip binary (dereferencing symlink) and replace with no-op during build
+          cp -L "$TOOLCHAIN_BIN/llvm-strip" /tmp/llvm-strip
+          chmod +x /tmp/llvm-strip
+          rm -f "$TOOLCHAIN_BIN/llvm-strip"
+          printf '#!/usr/bin/env bash\nexit 0\n' > "$TOOLCHAIN_BIN/llvm-strip"
+          chmod +x "$TOOLCHAIN_BIN/llvm-strip"
+
+          # Wrap ld.lld to force --emit-relocs and prevent link-time stripping on shared libraries
+          mv "$TOOLCHAIN_BIN/ld.lld" "$TOOLCHAIN_BIN/ld.lld.real"
+          cat << 'EOF' > "$TOOLCHAIN_BIN/ld.lld"
+          #!/usr/bin/env bash
+          ARGS=()
+          for arg in "$@"; do
+            case "$arg" in
+              -s|--strip-all|--strip-debug) continue ;;
+              *) ARGS+=("$arg") ;;
+            esac
+          done
+          if [[ " ${ARGS[*]} " == *" -shared "* ]]; then
+            exec "$(dirname "$0")/ld.lld.real" "${ARGS[@]}" --emit-relocs --gc-sections --icf=all -Bsymbolic -z now --undefined-version
+          else
+            exec "$(dirname "$0")/ld.lld.real" "${ARGS[@]}"
+          fi
+          EOF
+          chmod +x "$TOOLCHAIN_BIN/ld.lld"
 
       - name: build arm64 codec
         run: ./build.sh --arm64
         shell: bash
         env:
-          LDFLAGS: "-Wl,--emit-relocs -Wl,--gc-sections -Wl,--icf=all -Wl,-Bsymbolic -Wl,-z,now -Wl,--pack-dyn-relocs=relr -Wl,--undefined-version"
+          LDFLAGS: "-Wl,--emit-relocs -Wl,--gc-sections -Wl,--icf=all -Wl,-Bsymbolic -Wl,-z,now -Wl,--undefined-version"
           CFLAGS: "-O3 -march=armv9-a+crypto+dotprod+i8mm+sve2 -mcpu=cortex-x4 -fomit-frame-pointer -fno-signed-zeros -fno-trapping-math -funroll-loops"
           CXXFLAGS: "-O3 -march=armv9-a+crypto+dotprod+i8mm+sve2 -mcpu=cortex-x4 -fomit-frame-pointer -fno-signed-zeros -fno-trapping-math -funroll-loops"
-          EXTRA_CFLAGS: "-flto=full -fwhole-program-vtables -fno-semantic-interposition -fno-plt -ffp-contract=fast -fno-math-errno -falign-loops=32 -falign-functions=64 -mllvm -unroll-threshold=400"
-          EXTRA_CXXFLAGS: "-flto=full -fwhole-program-vtables -fno-semantic-interposition -fno-plt -ffp-contract=fast -fno-math-errno -falign-loops=32 -falign-functions=64 -mllvm -unroll-threshold=400"
+          EXTRA_CFLAGS: "-flto=full -fwhole-program-vtables -fno-semantic-interposition -fno-plt -ffp-contract=fast -fno-math-errno -falign-loops=32 -falign-functions=64 -mllvm -unroll-threshold=400 -march=armv9-a+crypto+dotprod+i8mm+sve2 -mcpu=cortex-x4"
+          EXTRA_CXXFLAGS: "-flto=full -fwhole-program-vtables -fno-semantic-interposition -fno-plt -ffp-contract=fast -fno-math-errno -falign-loops=32 -falign-functions=64 -mllvm -unroll-threshold=400 -march=armv9-a+crypto+dotprod+i8mm+sve2 -mcpu=cortex-x4"
 
       - name: optimize arm64 binary with llvm-bolt
         if: success()
         shell: bash
         run: |
-          BOLT_BIN=$(find /opt/hostedtoolcache/ndk -name "llvm-bolt" -type f | head -n 1)
-          STRIP_BIN=$(find /opt/hostedtoolcache/ndk -name "llvm-strip" -type f | head -n 1)
+          BOLT_BIN=$(find /opt/hostedtoolcache/ndk -name "llvm-bolt" | head -n 1)
+          STRIP_BIN="/tmp/llvm-strip"
           echo "Using llvm-bolt: $BOLT_BIN"
           echo "Using llvm-strip: $STRIP_BIN"
 
@@ -56,13 +85,15 @@ jobs:
             unzip -q "$zip_file" -d bolt_work/
             for so_file in bolt_work/*; do
               if file "$so_file" | grep -q "ELF"; then
+                echo "Verifying relocations in $so_file..."
+                readelf -S "$so_file" | grep -E "rela\.text|rel\.text" || true
                 echo "Running BOLT on $so_file..."
                 "$BOLT_BIN" "$so_file" -o "${so_file}.bolt" \
-                  -reorder-blocks=ext-tsp \
-                  -reorder-functions=hfsort \
-                  -split-functions \
-                  -icf=1 \
-                  -use-gnu-stack
+                  --icf=all \
+                  --peepholes=all \
+                  --plt=all \
+                  --align-functions=64 \
+                  --use-gnu-stack
                 mv "${so_file}.bolt" "$so_file"
                 "$STRIP_BIN" --strip-unneeded "$so_file"
               fi
