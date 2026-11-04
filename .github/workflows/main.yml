@@ -27,29 +27,24 @@ jobs:
         with:
           ndk-version: r30
 
-      - name: wrap NDK linker and strip preserving exact binary names
+      - name: wrap NDK linker in-place to preserve RPATH and emit relocations for BOLT
         shell: bash
         run: |
           BOLT_BIN=$(find /opt/hostedtoolcache/ndk -name "llvm-bolt" | head -n 1)
           TOOLCHAIN_BIN=$(dirname "$BOLT_BIN")
           echo "Found NDK toolchain bin: $TOOLCHAIN_BIN"
 
-          mkdir -p /tmp/real_ndk_bin
-
-          # Copy real binaries preserving exact basenames (ld.lld and llvm-strip inspect argv[0])
-          cp -L "$TOOLCHAIN_BIN/llvm-strip" /tmp/real_ndk_bin/llvm-strip
-          cp -L "$TOOLCHAIN_BIN/ld.lld" /tmp/real_ndk_bin/ld.lld
-          chmod +x /tmp/real_ndk_bin/llvm-strip /tmp/real_ndk_bin/ld.lld
-
-          # Replace toolchain llvm-strip with a no-op during build so relocations survive for BOLT
+          # Replace llvm-strip symlink with a no-op during build so relocations survive for BOLT
           rm -f "$TOOLCHAIN_BIN/llvm-strip"
           printf '#!/usr/bin/env bash\nexit 0\n' > "$TOOLCHAIN_BIN/llvm-strip"
           chmod +x "$TOOLCHAIN_BIN/llvm-strip"
 
-          # Replace toolchain ld.lld with wrapper that calls /tmp/real_ndk_bin/ld.lld
+          # Replace ld.lld symlink in-place and invoke $DIR/lld with argv[0]="ld.lld"
           rm -f "$TOOLCHAIN_BIN/ld.lld"
           cat << 'EOF' > "$TOOLCHAIN_BIN/ld.lld"
           #!/usr/bin/env bash
+          DIR="$(cd "$(dirname "$0")" && pwd)"
+          export LD_LIBRARY_PATH="$DIR/../lib:$DIR/../lib64:${LD_LIBRARY_PATH:-}"
           ARGS=()
           for arg in "$@"; do
             case "$arg" in
@@ -58,9 +53,9 @@ jobs:
             esac
           done
           if [[ " ${ARGS[*]} " == *" -shared "* ]]; then
-            exec /tmp/real_ndk_bin/ld.lld "${ARGS[@]}" --emit-relocs --gc-sections --icf=all -Bsymbolic -z now --undefined-version
+            exec -a ld.lld "$DIR/lld" "${ARGS[@]}" --emit-relocs --gc-sections --icf=all -Bsymbolic -z now --undefined-version
           else
-            exec /tmp/real_ndk_bin/ld.lld "${ARGS[@]}"
+            exec -a ld.lld "$DIR/lld" "${ARGS[@]}"
           fi
           EOF
           chmod +x "$TOOLCHAIN_BIN/ld.lld"
@@ -80,9 +75,9 @@ jobs:
         shell: bash
         run: |
           BOLT_BIN=$(find /opt/hostedtoolcache/ndk -name "llvm-bolt" | head -n 1)
-          STRIP_BIN="/tmp/real_ndk_bin/llvm-strip"
+          TOOLCHAIN_BIN=$(dirname "$BOLT_BIN")
+          export LD_LIBRARY_PATH="$TOOLCHAIN_BIN/../lib:$TOOLCHAIN_BIN/../lib64:${LD_LIBRARY_PATH:-}"
           echo "Using llvm-bolt: $BOLT_BIN"
-          echo "Using llvm-strip: $STRIP_BIN"
 
           for zip_file in output/*.zip; do
             [[ "$zip_file" == *"aio"* ]] && continue
@@ -94,13 +89,13 @@ jobs:
                 readelf -S "$so_file" | grep -E "rela\.text|rel\.text" || true
                 echo "Running BOLT on $so_file..."
                 "$BOLT_BIN" "$so_file" -o "${so_file}.bolt" \
+                  --lite=0 \
                   --icf=all \
                   --peepholes=all \
                   --plt=all \
                   --align-functions=64 \
                   --use-gnu-stack
                 mv "${so_file}.bolt" "$so_file"
-                "$STRIP_BIN" --strip-unneeded "$so_file"
               fi
             done
             rm -f "$zip_file"
