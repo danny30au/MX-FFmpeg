@@ -17,28 +17,65 @@ jobs:
     steps:
       - name: checkout tools repo
         uses: actions/checkout@v4
+
       - name: install build tools
-        run: sudo apt update && sudo apt install -y nasm meson ninja-build
+        run: sudo apt update && sudo apt install -y nasm meson ninja-build zip unzip
+
       - name: setting up NDK
         uses: nttld/setup-ndk@v1
         id: setup-ndk
         with:
           ndk-version: r30
-      - name: hook build.sh to upgrade armv8-a to armv9-a once unpacked
+
+      - name: hook build.sh to upgrade armv8-a to armv9-a and preserve relocs for BOLT
         run: |
-          sed -i 's|build-ffmpeg.sh arm64|build-ffmpeg.sh arm64|; /build-ffmpeg.sh/i find . -name "build-ffmpeg.sh" -exec sed -i "s/-march=armv8-a/-march=armv9-a+crypto+dotprod+i8mm+sve2 -mcpu=cortex-x4/g" {} +' build.sh
+          sed -i '/build-ffmpeg.sh/i find . -name "build-ffmpeg.sh" -exec sed -i "s/-march=armv8-a/-march=armv9-a+crypto+dotprod+i8mm+sve2 -mcpu=cortex-x4/g; s/--enable-stripping/--disable-stripping/g; s/\\$CROSS_PREFIX-strip/true/g; s/llvm-strip/true/g" {} +' build.sh
+
       - name: build arm64 codec
         run: ./build.sh --arm64
         shell: bash
         env:
-          LDFLAGS: "-Wl,--emit-relocs -Wl,--gc-sections -Wl,-Bsymbolic -Wl,--undefined-version"
+          LDFLAGS: "-Wl,--emit-relocs -Wl,--gc-sections -Wl,--icf=all -Wl,-Bsymbolic -Wl,-z,now -Wl,--pack-dyn-relocs=relr -Wl,--undefined-version"
           CFLAGS: "-O3 -march=armv9-a+crypto+dotprod+i8mm+sve2 -mcpu=cortex-x4 -fomit-frame-pointer -fno-signed-zeros -fno-trapping-math -funroll-loops"
           CXXFLAGS: "-O3 -march=armv9-a+crypto+dotprod+i8mm+sve2 -mcpu=cortex-x4 -fomit-frame-pointer -fno-signed-zeros -fno-trapping-math -funroll-loops"
-          EXTRA_CFLAGS: "-flto=full -falign-loops=32 -falign-functions=64 -mllvm -unroll-threshold=400"
-          EXTRA_CXXFLAGS: "-flto=full -falign-loops=32 -falign-functions=64 -mllvm -unroll-threshold=400"
+          EXTRA_CFLAGS: "-flto=full -fwhole-program-vtables -fno-semantic-interposition -fno-plt -ffp-contract=fast -fno-math-errno -falign-loops=32 -falign-functions=64 -mllvm -unroll-threshold=400"
+          EXTRA_CXXFLAGS: "-flto=full -fwhole-program-vtables -fno-semantic-interposition -fno-plt -ffp-contract=fast -fno-math-errno -falign-loops=32 -falign-functions=64 -mllvm -unroll-threshold=400"
+
+      - name: optimize arm64 binary with llvm-bolt
+        if: success()
+        shell: bash
+        run: |
+          BOLT_BIN=$(find /opt/hostedtoolcache/ndk -name "llvm-bolt" -type f | head -n 1)
+          STRIP_BIN=$(find /opt/hostedtoolcache/ndk -name "llvm-strip" -type f | head -n 1)
+          echo "Using llvm-bolt: $BOLT_BIN"
+          echo "Using llvm-strip: $STRIP_BIN"
+
+          for zip_file in output/*.zip; do
+            [[ "$zip_file" == *"aio"* ]] && continue
+            mkdir -p bolt_work
+            unzip -q "$zip_file" -d bolt_work/
+            for so_file in bolt_work/*; do
+              if file "$so_file" | grep -q "ELF"; then
+                echo "Running BOLT on $so_file..."
+                "$BOLT_BIN" "$so_file" -o "${so_file}.bolt" \
+                  -reorder-blocks=ext-tsp \
+                  -reorder-functions=hfsort \
+                  -split-functions \
+                  -icf=1 \
+                  -use-gnu-stack
+                mv "${so_file}.bolt" "$so_file"
+                "$STRIP_BIN" --strip-unneeded "$so_file"
+              fi
+            done
+            rm -f "$zip_file"
+            (cd bolt_work && zip -q -9 "../$zip_file" *)
+            rm -rf bolt_work
+          done
+
       - name: dump ffmpeg config.log on failure
         if: failure()
         run: find . -name "config.log" -exec tail -n 50 {} +
+
       - name: save artifacts
         uses: actions/upload-artifact@v4
         if: success()
@@ -54,25 +91,30 @@ jobs:
     steps:
       - name: checkout tools repo
         uses: actions/checkout@v4
+
       - name: install build tools
         run: sudo apt update && sudo apt install -y nasm meson ninja-build
+
       - name: setting up NDK
         uses: nttld/setup-ndk@v1
         id: setup-ndk
         with:
           ndk-version: r30
+
       - name: build neon codec
         run: ./build.sh --neon
         shell: bash
         env:
-          LDFLAGS: "-Wl,--emit-relocs -Wl,--gc-sections -Wl,-Bsymbolic -Wl,--undefined-version"
+          LDFLAGS: "-Wl,--emit-relocs -Wl,--gc-sections -Wl,--icf=all -Wl,-Bsymbolic -Wl,-z,now -Wl,--undefined-version"
           CFLAGS: "-O3 -fomit-frame-pointer -fno-signed-zeros -fno-trapping-math -funroll-loops"
           CXXFLAGS: "-O3 -fomit-frame-pointer -fno-signed-zeros -fno-trapping-math -funroll-loops"
-          EXTRA_CFLAGS: "-flto=full -falign-loops=32 -falign-functions=64 -mllvm -unroll-threshold=400"
-          EXTRA_CXXFLAGS: "-flto=full -falign-loops=32 -falign-functions=64 -mllvm -unroll-threshold=400"
+          EXTRA_CFLAGS: "-flto=full -fwhole-program-vtables -fno-semantic-interposition -fno-plt -ffp-contract=fast -fno-math-errno -falign-loops=32 -falign-functions=64 -mllvm -unroll-threshold=400"
+          EXTRA_CXXFLAGS: "-flto=full -fwhole-program-vtables -fno-semantic-interposition -fno-plt -ffp-contract=fast -fno-math-errno -falign-loops=32 -falign-functions=64 -mllvm -unroll-threshold=400"
+
       - name: dump ffmpeg config.log on failure
         if: failure()
         run: find . -name "config.log" -exec tail -n 50 {} +
+
       - name: save artifacts
         uses: actions/upload-artifact@v4
         if: success()
@@ -88,22 +130,26 @@ jobs:
     steps:
       - name: checkout tools repo
         uses: actions/checkout@v4
+
       - name: install build tools
         run: sudo apt update && sudo apt install -y nasm meson ninja-build
+
       - name: setting up NDK
         uses: nttld/setup-ndk@v1
         id: setup-ndk
         with:
           ndk-version: r30
+
       - name: build x86_64 codec
         run: ./build.sh --x86_64
         shell: bash
         env:
-          LDFLAGS: "-Wl,--emit-relocs -Wl,--gc-sections -Wl,-Bsymbolic -Wl,--undefined-version"
+          LDFLAGS: "-Wl,--emit-relocs -Wl,--gc-sections -Wl,--icf=all -Wl,-Bsymbolic -Wl,-z,now -Wl,--pack-dyn-relocs=relr -Wl,--undefined-version"
           CFLAGS: "-O3 -fomit-frame-pointer -fno-signed-zeros -fno-trapping-math -funroll-loops"
           CXXFLAGS: "-O3 -fomit-frame-pointer -fno-signed-zeros -fno-trapping-math -funroll-loops"
-          EXTRA_CFLAGS: "-flto=full"
-          EXTRA_CXXFLAGS: "-flto=full"
+          EXTRA_CFLAGS: "-flto=full -fwhole-program-vtables -fno-semantic-interposition -fno-plt -ffp-contract=fast -fno-math-errno"
+          EXTRA_CXXFLAGS: "-flto=full -fwhole-program-vtables -fno-semantic-interposition -fno-plt -ffp-contract=fast -fno-math-errno"
+
       - name: save artifacts
         uses: actions/upload-artifact@v4
         if: success()
@@ -119,22 +165,26 @@ jobs:
     steps:
       - name: checkout tools repo
         uses: actions/checkout@v4
+
       - name: install build tools
         run: sudo apt update && sudo apt install -y nasm meson ninja-build
+
       - name: setting up NDK
         uses: nttld/setup-ndk@v1
         id: setup-ndk
         with:
           ndk-version: r30
+
       - name: build x86 codec
         run: ./build.sh --x86
         shell: bash
         env:
-          LDFLAGS: "-Wl,--emit-relocs -Wl,--gc-sections -Wl,-Bsymbolic -Wl,--undefined-version"
+          LDFLAGS: "-Wl,--emit-relocs -Wl,--gc-sections -Wl,--icf=all -Wl,-Bsymbolic -Wl,-z,now -Wl,--undefined-version"
           CFLAGS: "-O3 -fomit-frame-pointer -fno-signed-zeros -fno-trapping-math -funroll-loops"
           CXXFLAGS: "-O3 -fomit-frame-pointer -fno-signed-zeros -fno-trapping-math -funroll-loops"
-          EXTRA_CFLAGS: "-flto=full"
-          EXTRA_CXXFLAGS: "-flto=full"
+          EXTRA_CFLAGS: "-flto=full -fwhole-program-vtables -fno-semantic-interposition -fno-plt -ffp-contract=fast -fno-math-errno"
+          EXTRA_CXXFLAGS: "-flto=full -fwhole-program-vtables -fno-semantic-interposition -fno-plt -ffp-contract=fast -fno-math-errno"
+
       - name: save artifacts
         uses: actions/upload-artifact@v4
         if: success()
@@ -155,14 +205,17 @@ jobs:
           path: artifacts
           pattern: artifact-*
           merge-multiple: true
+
       - name: list all artifacts
         run: ls -R artifacts
+
       - name: merge artifacts
         if: success()
         run: |
           mkdir temp
           unzip -q 'artifacts/*.zip' -d temp/
           zip -j artifacts/aio-${{ github.ref_name }}.zip temp/*
+
       - name: publish artifacts
         uses: softprops/action-gh-release@v1
         if: ${{ github.ref_type == 'tag' }}
