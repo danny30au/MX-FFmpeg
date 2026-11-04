@@ -28,11 +28,14 @@ jobs:
         run: ./build.sh --arm64
         shell: bash
         env:
-          LDFLAGS: "-Wl,--gc-sections -Wl,-Bsymbolic"
-          CFLAGS: "-O3 -march=armv9-a+crypto+dotprod+i8mm+sve2 -mcpu=cortex-x4 -fomit-frame-pointer -funroll-loops"
-          CXXFLAGS: "-O3 -march=armv9-a+crypto+dotprod+i8mm+sve2 -mcpu=cortex-x4 -fomit-frame-pointer -funroll-loops"
-          EXTRA_CFLAGS: "-mllvm -align-loops=32 -falign-functions=64 -mllvm -unroll-threshold=400 -mllvm -loop-unroll-max-upper-bound=32"
-          EXTRA_LDFLAGS: "-flto=full"
+          LDFLAGS: "-Wl,--emit-relocs -Wl,--gc-sections -Wl,-Bsymbolic -Wl,--undefined-version"
+          CFLAGS: "-O3 -march=armv9-a+crypto+dotprod+i8mm+sve2 -mcpu=cortex-x4 -fomit-frame-pointer -fno-signed-zeros -fno-trapping-math -funroll-loops"
+          CXXFLAGS: "-O3 -march=armv9-a+crypto+dotprod+i8mm+sve2 -mcpu=cortex-x4 -fomit-frame-pointer -fno-signed-zeros -fno-trapping-math -funroll-loops"
+          EXTRA_CFLAGS: "-flto=full -mllvm -align-loops=32 -falign-functions=64 -mllvm -unroll-threshold=400"
+          EXTRA_CXXFLAGS: "-flto=full -mllvm -align-loops=32 -falign-functions=64 -mllvm -unroll-threshold=400"
+      - name: dump ffmpeg config.log on failure
+        if: failure()
+        run: find . -name "config.log" -exec tail -n 50 {} +
       - name: save artifacts
         uses: actions/upload-artifact@v4
         if: success()
@@ -42,6 +45,7 @@ jobs:
             output/*.zip
             !output/aio*.zip
           if-no-files-found: error
+
   build-neon:
     runs-on: ubuntu-latest
     steps:
@@ -58,11 +62,14 @@ jobs:
         run: ./build.sh --neon
         shell: bash
         env:
-          LDFLAGS: "-Wl,--gc-sections -Wl,-Bsymbolic"
-          CFLAGS: "-O3 -march=armv9-a+crypto+dotprod+i8mm+sve2 -mcpu=cortex-x4 -fomit-frame-pointer -funroll-loops"
-          CXXFLAGS: "-O3 -march=armv9-a+crypto+dotprod+i8mm+sve2 -mcpu=cortex-x4 -fomit-frame-pointer -funroll-loops"
-          EXTRA_CFLAGS: "-mllvm -align-loops=32 -falign-functions=64 -mllvm -unroll-threshold=400 -mllvm -loop-unroll-max-upper-bound=32"
-          EXTRA_LDFLAGS: "-flto=full"
+          LDFLAGS: "-Wl,--emit-relocs -Wl,--gc-sections -Wl,-Bsymbolic -Wl,--undefined-version"
+          CFLAGS: "-O3 -fomit-frame-pointer -fno-signed-zeros -fno-trapping-math -funroll-loops"
+          CXXFLAGS: "-O3 -fomit-frame-pointer -fno-signed-zeros -fno-trapping-math -funroll-loops"
+          EXTRA_CFLAGS: "-flto=full -mllvm -align-loops=32 -falign-functions=64 -mllvm -unroll-threshold=400"
+          EXTRA_CXXFLAGS: "-flto=full -mllvm -align-loops=32 -falign-functions=64 -mllvm -unroll-threshold=400"
+      - name: dump ffmpeg config.log on failure
+        if: failure()
+        run: find . -name "config.log" -exec tail -n 50 {} +
       - name: save artifacts
         uses: actions/upload-artifact@v4
         if: success()
@@ -72,6 +79,7 @@ jobs:
             output/*.zip
             !output/aio*.zip
           if-no-files-found: error
+
   build-x86_64:
     runs-on: ubuntu-latest
     steps:
@@ -88,11 +96,11 @@ jobs:
         run: ./build.sh --x86_64
         shell: bash
         env:
-          LDFLAGS: "-Wl,--gc-sections -Wl,-Bsymbolic"
-          CFLAGS: "-O3 -fomit-frame-pointer -funroll-loops"
-          CXXFLAGS: "-O3 -fomit-frame-pointer -funroll-loops"
-          EXTRA_CFLAGS: ""
-          EXTRA_LDFLAGS: "-flto=full"
+          LDFLAGS: "-Wl,--emit-relocs -Wl,--gc-sections -Wl,-Bsymbolic -Wl,--undefined-version"
+          CFLAGS: "-O3 -fomit-frame-pointer -fno-signed-zeros -fno-trapping-math -funroll-loops"
+          CXXFLAGS: "-O3 -fomit-frame-pointer -fno-signed-zeros -fno-trapping-math -funroll-loops"
+          EXTRA_CFLAGS: "-flto=full"
+          EXTRA_CXXFLAGS: "-flto=full"
       - name: save artifacts
         uses: actions/upload-artifact@v4
         if: success()
@@ -102,6 +110,7 @@ jobs:
             output/*.zip
             !output/aio*.zip
           if-no-files-found: error
+
   build-x86:
     runs-on: ubuntu-latest
     steps:
@@ -118,11 +127,11 @@ jobs:
         run: ./build.sh --x86
         shell: bash
         env:
-          LDFLAGS: "-Wl,--gc-sections -Wl,-Bsymbolic"
-          CFLAGS: "-O3 -fomit-frame-pointer -funroll-loops"
-          CXXFLAGS: "-O3 -fomit-frame-pointer -funroll-loops"
-          EXTRA_CFLAGS: ""
-          EXTRA_LDFLAGS: "-flto=full"
+          LDFLAGS: "-Wl,--emit-relocs -Wl,--gc-sections -Wl,-Bsymbolic -Wl,--undefined-version"
+          CFLAGS: "-O3 -fomit-frame-pointer -fno-signed-zeros -fno-trapping-math -funroll-loops"
+          CXXFLAGS: "-O3 -fomit-frame-pointer -fno-signed-zeros -fno-trapping-math -funroll-loops"
+          EXTRA_CFLAGS: "-flto=full"
+          EXTRA_CXXFLAGS: "-flto=full"
       - name: save artifacts
         uses: actions/upload-artifact@v4
         if: success()
@@ -132,6 +141,7 @@ jobs:
             output/*.zip
             !output/aio*.zip
           if-no-files-found: error
+
   publishing:
     runs-on: ubuntu-latest
     needs: [build-arm64, build-neon, build-x86_64, build-x86]
