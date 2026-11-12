@@ -69,14 +69,55 @@ jobs:
       - name: Install Build Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y yasm nasm pkg-config zip binutils
+          sudo apt-get install -y yasm nasm pkg-config zip binutils dos2unix
 
       - name: Compile libffmpeg.mx.so
         run: |
-          chmod +x *.sh
+          # 1. Strip any Windows CRLF (\r\n) line endings and mark scripts executable
+          find . -type f \( -name "*.sh" -o -name "ENV" -o -name "configure" \) -exec sed -i 's/\r$//' {} +
+          find . -type f \( -name "*.sh" -o -name "configure" \) -exec chmod +x {} +
+
+          # 2. Locate build-ffmpeg.sh (or fallback build.sh) across root, ffmpeg/JNI, or jni
+          BUILD_SCRIPT=$(find . -maxdepth 3 -name "build-ffmpeg.sh" | head -n 1)
+          if [ -z "${BUILD_SCRIPT}" ]; then
+            BUILD_SCRIPT=$(find . -maxdepth 3 -name "build.sh" | head -n 1)
+          fi
+
+          if [ -z "${BUILD_SCRIPT}" ]; then
+            echo "::error::Could not find build-ffmpeg.sh or build.sh in repository!"
+            find . -maxdepth 3 -name "*.sh"
+            exit 1
+          fi
+
+          BUILD_DIR=$(dirname "${BUILD_SCRIPT}")
+          SCRIPT_NAME=$(basename "${BUILD_SCRIPT}")
+          echo "Found build script: ${BUILD_SCRIPT} (working directory: ${BUILD_DIR})"
+          cd "${BUILD_DIR}"
+
+          # 3. If an ENV file exists in the build directory, point its NDK path to our NDK
+          if [ -f "ENV" ]; then
+            sed -i "s|^export NDK=.*|export NDK=${ANDROID_NDK_HOME}|g" ENV
+            sed -i "s|^NDK=.*|NDK=${ANDROID_NDK_HOME}|g" ENV
+          fi
+
+          # 4. Map neon64 -> arm64 if the script expects 'arm64' as the target argument
+          TARGET_ARG="${MX_ARCH}"
+          if [ "${MX_ARCH}" = "neon64" ] && ! grep -q "neon64" "${SCRIPT_NAME}"; then
+            if grep -q "arm64" "${SCRIPT_NAME}"; then
+              TARGET_ARG="arm64"
+              echo "Mapped MX_ARCH=neon64 to script argument: ${TARGET_ARG}"
+            fi
+          fi
+
           export EXTRA_CFLAGS="${OPT_CFLAGS}"
           export EXTRA_LDFLAGS="${OPT_LDFLAGS}"
-          ./build-ffmpeg.sh "${MX_ARCH}"
+
+          # Run OpenSSL/dependency helper first if present and required by your repo
+          if [ -f "./build-openssl.sh" ]; then
+            ./build-openssl.sh "${TARGET_ARG}" || true
+          fi
+
+          bash "./${SCRIPT_NAME}" "${TARGET_ARG}"
 
       - name: Strip Unneeded Symbols & Verify ELF Headers
         run: |
@@ -86,6 +127,7 @@ jobs:
             exit 1
           fi
 
+          echo "Found binary at: ${SO_PATH}"
           echo "Size before strip: $(stat -c%s "${SO_PATH}") bytes"
           llvm-strip --strip-unneeded "${SO_PATH}"
           echo "Size after strip:  $(stat -c%s "${SO_PATH}") bytes"
