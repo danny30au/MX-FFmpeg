@@ -24,7 +24,7 @@ on:
 env:
   CODEC_VERSION: ${{ github.event.inputs.codec_version || '1.49.0' }}
   MX_ARCH: ${{ github.event.inputs.arch_abi || 'neon64' }}
-  NDK_VERSION: '27.2.12479018'
+  NDK_VERSION: 'r27c'
 
 jobs:
   build-ffmpeg:
@@ -36,18 +36,25 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Setup Android NDK r27
+      - name: Setup Android NDK r27c
         uses: nttld/setup-ndk@v1
         id: setup-ndk
         with:
           ndk-version: ${{ env.NDK_VERSION }}
           add-to-path: false
+          local-cache: true
 
       - name: Configure NDK Toolchain Path & Optimization Flags
         run: |
-          LLVM_BIN="${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          NDK_PATH="${{ steps.setup-ndk.outputs.ndk-path }}"
+          LLVM_BIN="${NDK_PATH}/toolchains/llvm/prebuilt/linux-x86_64/bin"
           echo "${LLVM_BIN}" >> $GITHUB_PATH
-          echo "ANDROID_NDK_HOME=${{ steps.setup-ndk.outputs.ndk-path }}" >> $GITHUB_ENV
+
+          # Export common NDK environment variables used across FFmpeg build scripts
+          echo "ANDROID_NDK_HOME=${NDK_PATH}" >> $GITHUB_ENV
+          echo "ANDROID_NDK_ROOT=${NDK_PATH}" >> $GITHUB_ENV
+          echo "NDK_ROOT=${NDK_PATH}" >> $GITHUB_ENV
+          echo "NDK=${NDK_PATH}" >> $GITHUB_ENV
 
           # Optimal ARM64 flags for neon64 builds
           if [ "${MX_ARCH}" = "neon64" ]; then
@@ -67,14 +74,12 @@ jobs:
       - name: Compile libffmpeg.mx.so
         run: |
           chmod +x *.sh
-          # Pass OPT_CFLAGS and OPT_LDFLAGS into your build script
           export EXTRA_CFLAGS="${OPT_CFLAGS}"
           export EXTRA_LDFLAGS="${OPT_LDFLAGS}"
           ./build-ffmpeg.sh "${MX_ARCH}"
 
       - name: Strip Unneeded Symbols & Verify ELF Headers
         run: |
-          # Locate the compiled shared library
           SO_PATH=$(find . -name "libffmpeg.mx.so" | head -n 1)
           if [ -z "${SO_PATH}" ]; then
             echo "::error::libffmpeg.mx.so was not found after build!"
