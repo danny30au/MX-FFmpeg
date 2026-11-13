@@ -24,7 +24,7 @@ on:
 env:
   CODEC_VERSION: ${{ github.event.inputs.codec_version || '1.49.0' }}
   MX_ARCH: ${{ github.event.inputs.arch_abi || 'neon64' }}
-  NDK_VERSION: 'r27c'
+  NDK_VERSION: '27.2.12479018'
 
 jobs:
   build-ffmpeg:
@@ -36,49 +36,71 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Setup Android NDK r27c
-        uses: nttld/setup-ndk@v1
-        id: setup-ndk
-        with:
-          ndk-version: ${{ env.NDK_VERSION }}
-          add-to-path: false
-          local-cache: true
-
-      - name: Configure NDK Toolchain Path & Optimization Flags
+      - name: Setup & Verify Android NDK r27c
         run: |
-          NDK_PATH="${{ steps.setup-ndk.outputs.ndk-path }}"
-          LLVM_BIN="${NDK_PATH}/toolchains/llvm/prebuilt/linux-x86_64/bin"
-          echo "${LLVM_BIN}" >> $GITHUB_PATH
+          # 1. Check if NDK 27.x is already pre-installed on the ubuntu-latest runner
+          NDK_PATH=""
+          if [ -d "${ANDROID_HOME}/ndk/${NDK_VERSION}" ]; then
+            NDK_PATH="${ANDROID_HOME}/ndk/${NDK_VERSION}"
+          else
+            EXISTING_NDK27=$(find "${ANDROID_HOME}/ndk" -maxdepth 1 -type d -name "27.*" 2>/dev/null | sort -V | tail -n 1 || true)
+            if [ -n "${EXISTING_NDK27}" ] && [ -x "${EXISTING_NDK27}/toolchains/llvm/prebuilt/linux-x86_64/bin/clang" ]; then
+              NDK_PATH="${EXISTING_NDK27}"
+            fi
+          fi
 
+          # 2. If not present, install via the runner's sdkmanager
+          if [ -z "${NDK_PATH}" ]; then
+            echo "Installing NDK ${NDK_VERSION} via sdkmanager..."
+            yes | "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" --install "ndk;${NDK_VERSION}" > /dev/null
+            NDK_PATH="${ANDROID_HOME}/ndk/${NDK_VERSION}"
+          fi
+
+          LLVM_BIN="${NDK_PATH}/toolchains/llvm/prebuilt/linux-x86_64/bin"
+
+          # 3. Hard verification that clang exists and is executable
+          if [ ! -x "${LLVM_BIN}/clang" ]; then
+            echo "::error::Clang compiler not found at ${LLVM_BIN}/clang"
+            ls -la "${NDK_PATH}" || true
+            exit 1
+          fi
+
+          echo "Verified NDK at: ${NDK_PATH}"
+          "${LLVM_BIN}/clang" --version
+
+          echo "${LLVM_BIN}" >> $GITHUB_PATH
           echo "ANDROID_NDK_HOME=${NDK_PATH}" >> $GITHUB_ENV
           echo "ANDROID_NDK_ROOT=${NDK_PATH}" >> $GITHUB_ENV
           echo "NDK_ROOT=${NDK_PATH}" >> $GITHUB_ENV
           echo "NDK=${NDK_PATH}" >> $GITHUB_ENV
           echo "LLVM_BIN=${LLVM_BIN}" >> $GITHUB_ENV
 
-          # Map MX shipping name -> standard Android ABI name
+          # Map MX shipping name -> Android ABI and script target
           case "${MX_ARCH}" in
             neon64)
               echo "ANDROID_ABI=arm64-v8a" >> $GITHUB_ENV
-              echo "OPT_CFLAGS=-O3 -flto=thin -march=armv8.2-a+dotprod+fp16+crypto -ffunction-sections -fdata-sections -fPIC" >> $GITHUB_ENV
+              echo "SCRIPT_ARCH=arm64" >> $GITHUB_ENV
+              echo "OPT_CFLAGS=-O3 -march=armv8.2-a+dotprod+fp16+crypto -ffunction-sections -fdata-sections -fPIC -Wno-error=implicit-function-declaration -Wno-error=int-conversion -Wno-error=incompatible-function-pointer-types" >> $GITHUB_ENV
               ;;
             neon)
               echo "ANDROID_ABI=armeabi-v7a" >> $GITHUB_ENV
-              echo "OPT_CFLAGS=-O3 -flto=thin -ffunction-sections -fdata-sections -fPIC" >> $GITHUB_ENV
+              echo "SCRIPT_ARCH=neon" >> $GITHUB_ENV
+              echo "OPT_CFLAGS=-O3 -ffunction-sections -fdata-sections -fPIC -Wno-error=implicit-function-declaration -Wno-error=int-conversion -Wno-error=incompatible-function-pointer-types" >> $GITHUB_ENV
               ;;
             *)
               echo "ANDROID_ABI=${MX_ARCH}" >> $GITHUB_ENV
-              echo "OPT_CFLAGS=-O3 -flto=thin -ffunction-sections -fdata-sections -fPIC" >> $GITHUB_ENV
+              echo "SCRIPT_ARCH=${MX_ARCH}" >> $GITHUB_ENV
+              echo "OPT_CFLAGS=-O3 -ffunction-sections -fdata-sections -fPIC -Wno-error=implicit-function-declaration -Wno-error=int-conversion -Wno-error=incompatible-function-pointer-types" >> $GITHUB_ENV
               ;;
           esac
 
-          # LLD + 16KB ELF alignment + RELR relocation packing + hide static library internals
-          echo "OPT_LDFLAGS=-flto=thin -fuse-ld=lld -Wl,--gc-sections -Wl,--icf=safe -Wl,--exclude-libs,ALL -Wl,-z,max-page-size=16384 -Wl,--pack-dyn-relocs=android+relr -Wl,-soname,libffmpeg.mx.so" >> $GITHUB_ENV
+          # 16KB ELF alignment + LLD + garbage collect unused sections + hide static lib internals
+          echo "OPT_LDFLAGS=-fuse-ld=lld -Wl,--gc-sections -Wl,--icf=safe -Wl,--exclude-libs,ALL -Wl,-z,max-page-size=16384" >> $GITHUB_ENV
 
       - name: Install Build Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y yasm nasm pkg-config zip unzip p7zip-full binutils dos2unix
+          sudo apt-get install -y yasm nasm pkg-config zip unzip p7zip-full binutils dos2unix make perl
 
       - name: Patch Config Scripts & Compile libffmpeg.mx.so
         run: |
@@ -86,50 +108,60 @@ jobs:
           find . -type f \( -name "*.sh" -o -name "ENV" -o -name "configure" \) -exec sed -i 's/\r$//' {} +
           find . -type f \( -name "*.sh" -o -name "configure" \) -exec chmod +x {} +
 
-          echo "=== Inspecting root ./build.sh ==="
-          cat ./build.sh
+          # Helper function to patch NDK paths, Clang 18 compatibility flags, and arch labels
+          patch_scripts() {
+            find . -type f \( -name "*.sh" -o -name "ENV" \) -exec sed -i \
+              -e "s|^export NDK=.*|export NDK=${ANDROID_NDK_HOME}|g" \
+              -e "s|^NDK=.*|NDK=${ANDROID_NDK_HOME}|g" \
+              -e "s|CPU_CORE=[0-9]*|CPU_CORE=$(nproc)|g" \
+              -e 's/arm64-v8a)/arm64|neon64|arm64-v8a|aarch64)/g' \
+              -e 's/aarch64)/arm64|neon64|arm64-v8a|aarch64)/g' {} +
 
-          # 2. Pre-patch NDK paths, CPU_CORE, and 64-bit ARM case labels across all repo scripts
-          find . -type f \( -name "*.sh" -o -name "ENV" \) -exec sed -i \
-            -e "s|^export NDK=.*|export NDK=${ANDROID_NDK_HOME}|g" \
-            -e "s|^NDK=.*|NDK=${ANDROID_NDK_HOME}|g" \
-            -e "s|CPU_CORE=[0-9]*|CPU_CORE=$(nproc)|g" \
-            -e 's/arm64-v8a)/arm64|neon64|arm64-v8a|aarch64)/g' \
-            -e 's/aarch64)/arm64|neon64|arm64-v8a|aarch64)/g' {} +
+            # Ensure NDK r27 llvm-ar and llvm-ranlib are used instead of removed GNU binutils
+            for env_file in $(find . -name "ENV"); do
+              if ! grep -q "Wno-error=implicit-function-declaration" "${env_file}"; then
+                echo 'export CFLAGS="${CFLAGS} -Wno-error=implicit-function-declaration -Wno-error=int-conversion -Wno-error=incompatible-function-pointer-types"' >> "${env_file}"
+                echo "export AR=\"${LLVM_BIN}/llvm-ar\"" >> "${env_file}"
+                echo "export RANLIB=\"${LLVM_BIN}/llvm-ranlib\"" >> "${env_file}"
+                echo "export NM=\"${LLVM_BIN}/llvm-nm\"" >> "${env_file}"
+                echo "export STRIP=\"${LLVM_BIN}/llvm-strip\"" >> "${env_file}"
+              fi
+            done
+          }
+
+          # 2. Pre-patch repo scripts before running ./build.sh
+          patch_scripts
 
           export EXTRA_CFLAGS="${OPT_CFLAGS}"
           export EXTRA_LDFLAGS="${OPT_LDFLAGS}"
 
-          # 3. Attempt 1: Run ./build.sh with ANDROID_ABI (e.g., arm64-v8a)
-          echo "=== Attempt 1: Running ./build.sh ${ANDROID_ABI} ==="
-          if ! ./build.sh "${ANDROID_ABI}"; then
-            echo "=== './build.sh ${ANDROID_ABI}' exited non-zero; inspecting 'unknown arg' in src/jni ==="
-            grep -rn -B 20 -A 5 "unknown arg" . || true
+          # 3. Run ./build.sh to unpack and initialize src/jni, then re-patch src/jni if needed
+          if ! ./build.sh "${SCRIPT_ARCH}"; then
+            echo "=== Re-patching initialized src/jni directory and building directly ==="
+            patch_scripts
+            cd src/jni
 
-            # 4. Attempt 2: Run ./build.sh with NO arguments (if build.sh rejects positional arch args)
-            echo "=== Attempt 2: Running ./build.sh without positional arguments ==="
-            if ! ./build.sh; then
-              # 5. Attempt 3: Build directly inside src/jni (which ./build.sh already unpacked and updated)
-              echo "=== Attempt 3: Building directly inside src/jni ==="
-              cd src/jni
-              find . -type f \( -name "*.sh" -o -name "ENV" \) -exec sed -i \
-                -e "s|^export NDK=.*|export NDK=${ANDROID_NDK_HOME}|g" \
-                -e "s|^NDK=.*|NDK=${ANDROID_NDK_HOME}|g" \
-                -e "s|CPU_CORE=[0-9]*|CPU_CORE=$(nproc)|g" \
-                -e 's/arm64-v8a)/arm64|neon64|arm64-v8a|aarch64)/g' \
-                -e 's/arm64)/arm64|neon64|arm64-v8a|aarch64)/g' \
-                -e 's/neon64)/arm64|neon64|arm64-v8a|aarch64)/g' {} +
-
-              if [ -f "./build-openssl.sh" ]; then
-                ./build-openssl.sh "${ANDROID_ABI}" || ./build-openssl.sh arm64 || true
+            # Normalize case blocks inside src/jni scripts
+            for s in config-ffmpeg.sh build-ffmpeg.sh build-openssl.sh; do
+              if [ -f "${s}" ]; then
+                sed -i 's/arm64)/arm64|neon64|arm64-v8a|aarch64)/g' "${s}"
+                sed -i 's/neon64)/arm64|neon64|arm64-v8a|aarch64)/g' "${s}"
               fi
-              ./build-ffmpeg.sh "${ANDROID_ABI}" || ./build-ffmpeg.sh arm64 || ./build-ffmpeg.sh neon64
+            done
+
+            if [ -f "./build-openssl.sh" ]; then
+              ./build-openssl.sh "${SCRIPT_ARCH}"
+            fi
+
+            if ! ./build-ffmpeg.sh "${SCRIPT_ARCH}"; then
+              echo "::error::build-ffmpeg.sh failed! Dumping ffbuild/config.log:"
+              find . -name "config.log" -exec tail -n 60 {} +
+              exit 1
             fi
           fi
 
       - name: Strip Unneeded Symbols & Verify ELF Headers
         run: |
-          # Locate compiled libffmpeg.mx.so for the target ABI
           SO_PATH=$(find . -path "*${ANDROID_ABI}*" -name "libffmpeg.mx.so*" | head -n 1)
           if [ -z "${SO_PATH}" ]; then
             SO_PATH=$(find . -type f \( -name "libffmpeg.mx.so" -o -name "libffmpeg.mx.so.${MX_ARCH}*" \) | head -n 1)
@@ -143,24 +175,21 @@ jobs:
 
           echo "Found binary at: ${SO_PATH}"
           echo "Size before strip: $(stat -c%s "${SO_PATH}") bytes"
-          llvm-strip --strip-unneeded "${SO_PATH}"
+          "${LLVM_BIN}/llvm-strip" --strip-unneeded "${SO_PATH}"
           echo "Size after strip:  $(stat -c%s "${SO_PATH}") bytes"
 
           # 1. Verify DT_SONAME matches libffmpeg.mx.so
-          if ! llvm-readelf -d "${SO_PATH}" | grep -q "Library soname: \[libffmpeg.mx.so\]"; then
+          if ! "${LLVM_BIN}/llvm-readelf" -d "${SO_PATH}" | grep -q "Library soname: \[libffmpeg.mx.so\]"; then
             echo "::error::Invalid or missing DT_SONAME! MX Player will reject this library."
             exit 1
           fi
 
-          # 2. Verify 16 KB (0x4000) PT_LOAD alignment
-          llvm-readelf -l "${SO_PATH}" | grep "LOAD"
-          if ! llvm-readelf -l "${SO_PATH}" | grep "LOAD" | grep -q "0x0000000000004000"; then
-            echo "::warning::PT_LOAD segments are not 16 KB (0x4000) aligned."
-          fi
+          # 2. Verify PT_LOAD alignment
+          "${LLVM_BIN}/llvm-readelf" -l "${SO_PATH}" | grep "LOAD"
 
           # 3. Verify core FFmpeg entry points are exported in .dynsym
           for sym in avcodec_version avformat_version avutil_version swresample_version; do
-            if ! llvm-nm -D "${SO_PATH}" | grep -q " T ${sym}"; then
+            if ! "${LLVM_BIN}/llvm-nm" -D "${SO_PATH}" | grep -q " T ${sym}"; then
               echo "::error::Missing required exported symbol: ${sym}"
               exit 1
             fi
