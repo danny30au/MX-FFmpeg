@@ -36,9 +36,8 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Setup & Verify Android NDK r27c
+      - name: Setup & Verify Android NDK r27
         run: |
-          # 1. Check if NDK 27.x is already pre-installed on the ubuntu-latest runner
           NDK_PATH=""
           if [ -d "${ANDROID_HOME}/ndk/${NDK_VERSION}" ]; then
             NDK_PATH="${ANDROID_HOME}/ndk/${NDK_VERSION}"
@@ -49,7 +48,6 @@ jobs:
             fi
           fi
 
-          # 2. If not present, install via the runner's sdkmanager
           if [ -z "${NDK_PATH}" ]; then
             echo "Installing NDK ${NDK_VERSION} via sdkmanager..."
             yes | "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" --install "ndk;${NDK_VERSION}" > /dev/null
@@ -57,17 +55,15 @@ jobs:
           fi
 
           LLVM_BIN="${NDK_PATH}/toolchains/llvm/prebuilt/linux-x86_64/bin"
-
-          # 3. Hard verification that clang exists and is executable
           if [ ! -x "${LLVM_BIN}/clang" ]; then
             echo "::error::Clang compiler not found at ${LLVM_BIN}/clang"
-            ls -la "${NDK_PATH}" || true
             exit 1
           fi
 
-          echo "Verified NDK at: ${NDK_PATH}"
+          echo "Using NDK at: ${NDK_PATH}"
           "${LLVM_BIN}/clang" --version
 
+          echo "${NDK_PATH}" >> $GITHUB_PATH
           echo "${LLVM_BIN}" >> $GITHUB_PATH
           echo "ANDROID_NDK_HOME=${NDK_PATH}" >> $GITHUB_ENV
           echo "ANDROID_NDK_ROOT=${NDK_PATH}" >> $GITHUB_ENV
@@ -75,41 +71,43 @@ jobs:
           echo "NDK=${NDK_PATH}" >> $GITHUB_ENV
           echo "LLVM_BIN=${LLVM_BIN}" >> $GITHUB_ENV
 
-          # Map MX shipping name -> Android ABI and script target
+          # Map MX shipping name -> Android ABI (required by ./build.sh)
           case "${MX_ARCH}" in
             neon64)
               echo "ANDROID_ABI=arm64-v8a" >> $GITHUB_ENV
-              echo "SCRIPT_ARCH=arm64" >> $GITHUB_ENV
-              echo "OPT_CFLAGS=-O3 -march=armv8.2-a+dotprod+fp16+crypto -ffunction-sections -fdata-sections -fPIC -Wno-error=implicit-function-declaration -Wno-error=int-conversion -Wno-error=incompatible-function-pointer-types" >> $GITHUB_ENV
+              echo "TARGET_MARCH=armv8.2-a+dotprod+fp16+crypto+i8mm" >> $GITHUB_ENV
+              echo "OPT_CFLAGS=-O3 -march=armv8.2-a+dotprod+fp16+crypto+i8mm -ffunction-sections -fdata-sections -fPIC -Wno-error=implicit-function-declaration -Wno-error=int-conversion -Wno-error=incompatible-function-pointer-types -Wno-error=format-security" >> $GITHUB_ENV
               ;;
             neon)
               echo "ANDROID_ABI=armeabi-v7a" >> $GITHUB_ENV
-              echo "SCRIPT_ARCH=neon" >> $GITHUB_ENV
-              echo "OPT_CFLAGS=-O3 -ffunction-sections -fdata-sections -fPIC -Wno-error=implicit-function-declaration -Wno-error=int-conversion -Wno-error=incompatible-function-pointer-types" >> $GITHUB_ENV
+              echo "TARGET_MARCH=armv7-a" >> $GITHUB_ENV
+              echo "OPT_CFLAGS=-O3 -ffunction-sections -fdata-sections -fPIC -Wno-error=implicit-function-declaration -Wno-error=int-conversion -Wno-error=incompatible-function-pointer-types -Wno-error=format-security" >> $GITHUB_ENV
               ;;
             *)
               echo "ANDROID_ABI=${MX_ARCH}" >> $GITHUB_ENV
-              echo "SCRIPT_ARCH=${MX_ARCH}" >> $GITHUB_ENV
-              echo "OPT_CFLAGS=-O3 -ffunction-sections -fdata-sections -fPIC -Wno-error=implicit-function-declaration -Wno-error=int-conversion -Wno-error=incompatible-function-pointer-types" >> $GITHUB_ENV
+              echo "TARGET_MARCH=x86-64" >> $GITHUB_ENV
+              echo "OPT_CFLAGS=-O3 -ffunction-sections -fdata-sections -fPIC -Wno-error=implicit-function-declaration -Wno-error=int-conversion -Wno-error=incompatible-function-pointer-types -Wno-error=format-security" >> $GITHUB_ENV
               ;;
           esac
 
-          # 16KB ELF alignment + LLD + garbage collect unused sections + hide static lib internals
           echo "OPT_LDFLAGS=-fuse-ld=lld -Wl,--gc-sections -Wl,--icf=safe -Wl,--exclude-libs,ALL -Wl,-z,max-page-size=16384" >> $GITHUB_ENV
 
       - name: Install Build Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y yasm nasm pkg-config zip unzip p7zip-full binutils dos2unix make perl
+          sudo apt-get install -y \
+            yasm nasm pkg-config zip unzip p7zip-full binutils dos2unix \
+            make perl autoconf automake libtool autopoint gettext \
+            meson ninja-build ragel cmake python3-pip
 
-      - name: Patch Config Scripts & Compile libffmpeg.mx.so
+      - name: Patch Config Scripts & Run Full Build Pipeline
         run: |
-          # 1. Strip CRLF line endings and set executable permissions
-          find . -type f \( -name "*.sh" -o -name "ENV" -o -name "configure" \) -exec sed -i 's/\r$//' {} +
+          # 1. Strip CRLF line endings and mark scripts executable
+          find . -type f \( -name "*.sh" -o -name "ENV" -o -name "configure" -o -name "*.mk" \) -exec sed -i 's/\r$//' {} +
           find . -type f \( -name "*.sh" -o -name "configure" \) -exec chmod +x {} +
 
-          # Helper function to patch NDK paths, Clang 18 compatibility flags, and arch labels
-          patch_scripts() {
+          # Helper function to patch NDK paths, Clang 18 flags, and -march overrides across both root and src/jni
+          apply_patches() {
             find . -type f \( -name "*.sh" -o -name "ENV" \) -exec sed -i \
               -e "s|^export NDK=.*|export NDK=${ANDROID_NDK_HOME}|g" \
               -e "s|^NDK=.*|NDK=${ANDROID_NDK_HOME}|g" \
@@ -117,43 +115,80 @@ jobs:
               -e 's/arm64-v8a)/arm64|neon64|arm64-v8a|aarch64)/g' \
               -e 's/aarch64)/arm64|neon64|arm64-v8a|aarch64)/g' {} +
 
-            # Ensure NDK r27 llvm-ar and llvm-ranlib are used instead of removed GNU binutils
+            # Replace hardcoded -march=armv8-a in config-ffmpeg.sh so it does not override TARGET_MARCH
+            if [ "${MX_ARCH}" = "neon64" ]; then
+              find . -name "config-ffmpeg.sh" -exec sed -i "s/-march=armv8-a/-march=${TARGET_MARCH}/g" {} +
+            fi
+
+            # Add Clang 18 compatibility flags and LLVM binutils to ENV files
             for env_file in $(find . -name "ENV"); do
               if ! grep -q "Wno-error=implicit-function-declaration" "${env_file}"; then
-                echo 'export CFLAGS="${CFLAGS} -Wno-error=implicit-function-declaration -Wno-error=int-conversion -Wno-error=incompatible-function-pointer-types"' >> "${env_file}"
+                echo 'export CFLAGS="${CFLAGS} -Wno-error=implicit-function-declaration -Wno-error=int-conversion -Wno-error=incompatible-function-pointer-types -Wno-error=format-security"' >> "${env_file}"
                 echo "export AR=\"${LLVM_BIN}/llvm-ar\"" >> "${env_file}"
                 echo "export RANLIB=\"${LLVM_BIN}/llvm-ranlib\"" >> "${env_file}"
                 echo "export NM=\"${LLVM_BIN}/llvm-nm\"" >> "${env_file}"
                 echo "export STRIP=\"${LLVM_BIN}/llvm-strip\"" >> "${env_file}"
               fi
             done
+
+            # Ensure ndk-build (Application.mk) allows legacy C/C++ code in mxutil, lame, iconv, etc. under Clang 18
+            for app_mk in $(find . -name "Application.mk"); do
+              if ! grep -q "Wno-error=implicit-function-declaration" "${app_mk}"; then
+                echo "" >> "${app_mk}"
+                echo "APP_CFLAGS += -Wno-error=implicit-function-declaration -Wno-error=int-conversion -Wno-error=incompatible-function-pointer-types -Wno-error=format-security" >> "${app_mk}"
+                echo "APP_CPPFLAGS += -Wno-register -Wno-error=format-security" >> "${app_mk}"
+              fi
+            done
           }
 
-          # 2. Pre-patch repo scripts before running ./build.sh
-          patch_scripts
+          # 2. Apply patches before ./build.sh copies config files into src/jni
+          apply_patches
 
           export EXTRA_CFLAGS="${OPT_CFLAGS}"
           export EXTRA_LDFLAGS="${OPT_LDFLAGS}"
 
-          # 3. Run ./build.sh to unpack and initialize src/jni, then re-patch src/jni if needed
-          if ! ./build.sh "${SCRIPT_ARCH}"; then
-            echo "=== Re-patching initialized src/jni directory and building directly ==="
-            patch_scripts
+          # 3. Run ./build.sh with ANDROID_ABI (arm64-v8a) so all prerequisites (openssl, smb2, lame, mxutil) are built
+          echo "=== Running ./build.sh ${ANDROID_ABI} ==="
+          if ! ./build.sh "${ANDROID_ABI}"; then
+            echo "=== ./build.sh ${ANDROID_ABI} interrupted; checking missing prerequisite libraries in src/jni ==="
+            apply_patches
             cd src/jni
+            mkdir -p "libs/${ANDROID_ABI}"
 
-            # Normalize case blocks inside src/jni scripts
-            for s in config-ffmpeg.sh build-ffmpeg.sh build-openssl.sh; do
-              if [ -f "${s}" ]; then
-                sed -i 's/arm64)/arm64|neon64|arm64-v8a|aarch64)/g' "${s}"
-                sed -i 's/neon64)/arm64|neon64|arm64-v8a|aarch64)/g' "${s}"
-              fi
-            done
-
-            if [ -f "./build-openssl.sh" ]; then
-              ./build-openssl.sh "${SCRIPT_ARCH}"
+            # Build OpenSSL if missing
+            if [ ! -f "libs/${ANDROID_ABI}/libcrypto.a" ] && [ -f "./build-openssl.sh" ]; then
+              ./build-openssl.sh "${ANDROID_ABI}" || ./build-openssl.sh arm64
             fi
 
-            if ! ./build-ffmpeg.sh "${SCRIPT_ARCH}"; then
+            # Build libsmb2 if missing
+            if [ ! -f "libs/${ANDROID_ABI}/libsmb2.a" ] && [ -f "./build-libsmb2.sh" ]; then
+              ./build-libsmb2.sh "${ANDROID_ABI}" || ./build-libsmb2.sh arm64
+            fi
+
+            # Build libmp3lame if a dedicated script exists
+            if [ ! -f "libs/${ANDROID_ABI}/libmp3lame.a" ] && [ -f "./build-lame.sh" ]; then
+              ./build-lame.sh "${ANDROID_ABI}" || ./build-lame.sh arm64
+            fi
+
+            # Build dav1d if a dedicated script exists
+            if [ -f "./build-dav1d.sh" ]; then
+              ./build-dav1d.sh "${ANDROID_ABI}" || ./build-dav1d.sh arm64 || true
+            fi
+
+            # Run ndk-build to compile libmxutil, libmp3lame, and other Android.mk static/shared modules
+            if [ ! -f "libs/${ANDROID_ABI}/libmxutil.so" ] && [ ! -f "libs/${ANDROID_ABI}/libmxutil.a" ]; then
+              "${ANDROID_NDK_HOME}/ndk-build" -j"$(nproc)" APP_ABI="${ANDROID_ABI}" NDK_PROJECT_PATH=. APP_BUILD_SCRIPT=./Android.mk NDK_APPLICATION_MK=./Application.mk || true
+            fi
+
+            # Copy any static/shared libraries from obj/local/<ABI> into libs/<ABI> so -L../libs/arm64-v8a finds them
+            if [ -d "obj/local/${ANDROID_ABI}" ]; then
+              find "obj/local/${ANDROID_ABI}" -maxdepth 1 \( -name "*.a" -o -name "*.so" \) -exec cp -n {} "libs/${ANDROID_ABI}/" \;
+            fi
+
+            echo "=== Contents of src/jni/libs/${ANDROID_ABI} before running build-ffmpeg.sh ==="
+            ls -la "libs/${ANDROID_ABI}/"
+
+            if ! ./build-ffmpeg.sh "${ANDROID_ABI}"; then
               echo "::error::build-ffmpeg.sh failed! Dumping ffbuild/config.log:"
               find . -name "config.log" -exec tail -n 60 {} +
               exit 1
