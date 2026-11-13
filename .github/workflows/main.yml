@@ -44,22 +44,24 @@ jobs:
           add-to-path: false
           local-cache: true
 
-      - name: Configure NDK Toolchain Path & Optimization Flags
+      - name: Configure NDK Toolchain Path & Architecture Mapping
         run: |
           NDK_PATH="${{ steps.setup-ndk.outputs.ndk-path }}"
           LLVM_BIN="${NDK_PATH}/toolchains/llvm/prebuilt/linux-x86_64/bin"
           echo "${LLVM_BIN}" >> $GITHUB_PATH
 
-          # Export common NDK environment variables used across FFmpeg build scripts
           echo "ANDROID_NDK_HOME=${NDK_PATH}" >> $GITHUB_ENV
           echo "ANDROID_NDK_ROOT=${NDK_PATH}" >> $GITHUB_ENV
           echo "NDK_ROOT=${NDK_PATH}" >> $GITHUB_ENV
           echo "NDK=${NDK_PATH}" >> $GITHUB_ENV
+          echo "LLVM_BIN=${LLVM_BIN}" >> $GITHUB_ENV
 
-          # Optimal ARM64 flags for neon64 builds
+          # Map MX shipping name (neon64) -> src/jni script argument (arm64)
           if [ "${MX_ARCH}" = "neon64" ]; then
+            echo "BUILD_ARCH=arm64" >> $GITHUB_ENV
             echo "OPT_CFLAGS=-O3 -flto=thin -march=armv8.2-a+dotprod+fp16+crypto -ffunction-sections -fdata-sections -fPIC" >> $GITHUB_ENV
           else
+            echo "BUILD_ARCH=${MX_ARCH}" >> $GITHUB_ENV
             echo "OPT_CFLAGS=-O3 -flto=thin -ffunction-sections -fdata-sections -fPIC" >> $GITHUB_ENV
           fi
 
@@ -71,57 +73,47 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y yasm nasm pkg-config zip binutils dos2unix
 
-      - name: Compile libffmpeg.mx.so
+      - name: Update Config Files & Compile in src/jni
         run: |
-          # 1. Strip any Windows CRLF (\r\n) line endings and mark scripts executable
+          # 1. Strip CRLF line endings and set executable permissions
           find . -type f \( -name "*.sh" -o -name "ENV" -o -name "configure" \) -exec sed -i 's/\r$//' {} +
           find . -type f \( -name "*.sh" -o -name "configure" \) -exec chmod +x {} +
 
-          # 2. Locate build-ffmpeg.sh (or fallback build.sh) across root, ffmpeg/JNI, or jni
-          BUILD_SCRIPT=$(find . -maxdepth 3 -name "build-ffmpeg.sh" | head -n 1)
-          if [ -z "${BUILD_SCRIPT}" ]; then
-            BUILD_SCRIPT=$(find . -maxdepth 3 -name "build.sh" | head -n 1)
-          fi
+          # 2. Enter src/jni directory
+          cd src/jni
+          pwd
 
-          if [ -z "${BUILD_SCRIPT}" ]; then
-            echo "::error::Could not find build-ffmpeg.sh or build.sh in repository!"
-            find . -maxdepth 3 -name "*.sh"
-            exit 1
-          fi
+          # 3. Patch case statements in config-ffmpeg.sh / build-ffmpeg.sh / build.sh so both arm64 and neon64 are accepted
+          for script in config-ffmpeg.sh build-ffmpeg.sh build-openssl.sh build.sh; do
+            if [ -f "${script}" ]; then
+              sed -i 's/arm64)/arm64|neon64|arm64-v8a)/g' "${script}"
+              sed -i "s|CPU_CORE=[0-9]*|CPU_CORE=$(nproc)|g" "${script}"
+            fi
+          done
 
-          BUILD_DIR=$(dirname "${BUILD_SCRIPT}")
-          SCRIPT_NAME=$(basename "${BUILD_SCRIPT}")
-          echo "Found build script: ${BUILD_SCRIPT} (working directory: ${BUILD_DIR})"
-          cd "${BUILD_DIR}"
-
-          # 3. If an ENV file exists in the build directory, point its NDK path to our NDK
+          # 4. Update any hardcoded NDK path inside ENV if present
           if [ -f "ENV" ]; then
             sed -i "s|^export NDK=.*|export NDK=${ANDROID_NDK_HOME}|g" ENV
             sed -i "s|^NDK=.*|NDK=${ANDROID_NDK_HOME}|g" ENV
           fi
 
-          # 4. Map neon64 -> arm64 if the script expects 'arm64' as the target argument
-          TARGET_ARG="${MX_ARCH}"
-          if [ "${MX_ARCH}" = "neon64" ] && ! grep -q "neon64" "${SCRIPT_NAME}"; then
-            if grep -q "arm64" "${SCRIPT_NAME}"; then
-              TARGET_ARG="arm64"
-              echo "Mapped MX_ARCH=neon64 to script argument: ${TARGET_ARG}"
-            fi
-          fi
-
           export EXTRA_CFLAGS="${OPT_CFLAGS}"
           export EXTRA_LDFLAGS="${OPT_LDFLAGS}"
 
-          # Run OpenSSL/dependency helper first if present and required by your repo
+          # 5. Build dependencies (such as OpenSSL) if present, then build FFmpeg using BUILD_ARCH (arm64)
           if [ -f "./build-openssl.sh" ]; then
-            ./build-openssl.sh "${TARGET_ARG}" || true
+            ./build-openssl.sh "${BUILD_ARCH}" || true
           fi
 
-          bash "./${SCRIPT_NAME}" "${TARGET_ARG}"
+          ./build-ffmpeg.sh "${BUILD_ARCH}"
 
       - name: Strip Unneeded Symbols & Verify ELF Headers
         run: |
-          SO_PATH=$(find . -name "libffmpeg.mx.so" | head -n 1)
+          SO_PATH=$(find src/jni -name "libffmpeg.mx.so" | head -n 1)
+          if [ -z "${SO_PATH}" ]; then
+            SO_PATH=$(find . -name "libffmpeg.mx.so" | head -n 1)
+          fi
+
           if [ -z "${SO_PATH}" ]; then
             echo "::error::libffmpeg.mx.so was not found after build!"
             exit 1
@@ -166,7 +158,6 @@ jobs:
           # -9 maximum standard Deflate compression
           zip -j -9 "${TARGET_ZIP}" "${TARGET_BIN}"
 
-          # Verify zip structure contains no nested folders
           unzip -l "${TARGET_ZIP}"
           sha256sum "${TARGET_ZIP}" "${TARGET_BIN}" > dist/checksums.sha256
 
