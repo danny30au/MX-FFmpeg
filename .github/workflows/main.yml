@@ -35,11 +35,11 @@ jobs:
         run: ./build.sh --arm64
         shell: bash
         env:
-          LDFLAGS: "-Wl,--gc-sections -Wl,--icf=all -Wl,-Bsymbolic -Wl,--undefined-version"
+          LDFLAGS: "-Wl,--gc-sections -Wl,--icf=all -Wl,-Bsymbolic -Wl,-O3 -Wl,--sort-section=alignment -Wl,--undefined-version"
           CFLAGS: "-O3 -march=armv9-a+crypto+dotprod+i8mm+sve2 -mcpu=cortex-x4 -fomit-frame-pointer -fno-signed-zeros -fno-trapping-math -funroll-loops"
           CXXFLAGS: "-O3 -march=armv9-a+crypto+dotprod+i8mm+sve2 -mcpu=cortex-x4 -fomit-frame-pointer -fno-signed-zeros -fno-trapping-math -funroll-loops"
-          EXTRA_CFLAGS: "-flto=full -fno-semantic-interposition -ffp-contract=fast -fno-math-errno -falign-loops=32 -falign-functions=64 -mllvm -unroll-threshold=400"
-          EXTRA_CXXFLAGS: "-flto=full -fno-semantic-interposition -ffp-contract=fast -fno-math-errno -falign-loops=32 -falign-functions=64 -mllvm -unroll-threshold=400"
+          EXTRA_CFLAGS: "-flto=full -fno-semantic-interposition -ffp-contract=fast -fno-math-errno -fvectorize -fslp-vectorize -falign-loops=32 -falign-functions=64 -mllvm -unroll-threshold=400"
+          EXTRA_CXXFLAGS: "-flto=full -fno-semantic-interposition -ffp-contract=fast -fno-math-errno -fvectorize -fslp-vectorize -falign-loops=32 -falign-functions=64 -mllvm -unroll-threshold=400"
 
       - name: dump ffmpeg config.log on failure
         if: failure()
@@ -74,11 +74,11 @@ jobs:
         run: ./build.sh --neon
         shell: bash
         env:
-          LDFLAGS: "-Wl,--gc-sections -Wl,--icf=all -Wl,-Bsymbolic -Wl,--undefined-version"
+          LDFLAGS: "-Wl,--gc-sections -Wl,--icf=all -Wl,-Bsymbolic -Wl,-O3 -Wl,--sort-section=alignment -Wl,--undefined-version"
           CFLAGS: "-O3 -fomit-frame-pointer -fno-signed-zeros -fno-trapping-math -funroll-loops"
           CXXFLAGS: "-O3 -fomit-frame-pointer -fno-signed-zeros -fno-trapping-math -funroll-loops"
-          EXTRA_CFLAGS: "-flto=full -fno-semantic-interposition -ffp-contract=fast -fno-math-errno -falign-loops=32 -falign-functions=64 -mllvm -unroll-threshold=400"
-          EXTRA_CXXFLAGS: "-flto=full -fno-semantic-interposition -ffp-contract=fast -fno-math-errno -falign-loops=32 -falign-functions=64 -mllvm -unroll-threshold=400"
+          EXTRA_CFLAGS: "-flto=full -fno-semantic-interposition -ffp-contract=fast -fno-math-errno -fvectorize -fslp-vectorize -falign-loops=32 -falign-functions=64 -mllvm -unroll-threshold=400"
+          EXTRA_CXXFLAGS: "-flto=full -fno-semantic-interposition -ffp-contract=fast -fno-math-errno -fvectorize -fslp-vectorize -falign-loops=32 -falign-functions=64 -mllvm -unroll-threshold=400"
 
       - name: dump ffmpeg config.log on failure
         if: failure()
@@ -113,11 +113,11 @@ jobs:
         run: ./build.sh --x86_64
         shell: bash
         env:
-          LDFLAGS: "-Wl,--gc-sections -Wl,--icf=all -Wl,-Bsymbolic -Wl,--undefined-version"
+          LDFLAGS: "-Wl,--gc-sections -Wl,--icf=all -Wl,-Bsymbolic -Wl,-O3 -Wl,--sort-section=alignment -Wl,--undefined-version"
           CFLAGS: "-O3 -fomit-frame-pointer -fno-signed-zeros -fno-trapping-math -funroll-loops"
           CXXFLAGS: "-O3 -fomit-frame-pointer -fno-signed-zeros -fno-trapping-math -funroll-loops"
-          EXTRA_CFLAGS: "-flto=full -fno-semantic-interposition -ffp-contract=fast -fno-math-errno"
-          EXTRA_CXXFLAGS: "-flto=full -fno-semantic-interposition -ffp-contract=fast -fno-math-errno"
+          EXTRA_CFLAGS: "-flto=full -fno-semantic-interposition -ffp-contract=fast -fno-math-errno -fvectorize -fslp-vectorize"
+          EXTRA_CXXFLAGS: "-flto=full -fno-semantic-interposition -ffp-contract=fast -fno-math-errno -fvectorize -fslp-vectorize"
 
       - name: save artifacts
         uses: actions/upload-artifact@v4
@@ -148,11 +148,11 @@ jobs:
         run: ./build.sh --x86
         shell: bash
         env:
-          LDFLAGS: "-Wl,--gc-sections -Wl,--icf=all -Wl,-Bsymbolic -Wl,--undefined-version"
+          LDFLAGS: "-Wl,--gc-sections -Wl,--icf=all -Wl,-Bsymbolic -Wl,-O3 -Wl,--sort-section=alignment -Wl,--undefined-version"
           CFLAGS: "-O3 -fomit-frame-pointer -fno-signed-zeros -fno-trapping-math -funroll-loops"
           CXXFLAGS: "-O3 -fomit-frame-pointer -fno-signed-zeros -fno-trapping-math -funroll-loops"
-          EXTRA_CFLAGS: "-flto=full -fno-semantic-interposition -ffp-contract=fast -fno-math-errno"
-          EXTRA_CXXFLAGS: "-flto=full -fno-semantic-interposition -ffp-contract=fast -fno-math-errno"
+          EXTRA_CFLAGS: "-flto=full -fno-semantic-interposition -ffp-contract=fast -fno-math-errno -fvectorize -fslp-vectorize"
+          EXTRA_CXXFLAGS: "-flto=full -fno-semantic-interposition -ffp-contract=fast -fno-math-errno -fvectorize -fslp-vectorize"
 
       - name: save artifacts
         uses: actions/upload-artifact@v4
